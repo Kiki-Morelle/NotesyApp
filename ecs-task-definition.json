@@ -1,0 +1,55 @@
+{
+  "family": "notesy",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::977098999802:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "notesy",
+      "image": "977098999802.dkr.ecr.us-east-1.amazonaws.com/notesy:0326390cbaf76ad1db607929837a0e72fde6c5a2",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8000,
+          "hostPort": 8000,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "DJANGO_SECRET_KEY",
+          "value": "deployment-temporary-key"
+        },
+        {
+          "name": "DJANGO_DEBUG",
+          "value": "False"
+        },
+        {
+          "name": "ALLOWED_HOSTS",
+          "value": "*"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "DATABASE_URL",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:977098999802:secret:notesy/database-url-eGuWFh"
+        }
+      ],
+      "command": [
+        "sh",
+        "-c",
+        "python manage.py migrate && python manage.py seed && gunicorn --bind 0.0.0.0:8000 notesy.wsgi:application"
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "ecs-notesy",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "notesy"
+        }
+      }
+    }
+  ]
+}
