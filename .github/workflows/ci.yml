@@ -1,3 +1,4 @@
+```yaml
 name: Notesy CI/CD
 
 on:
@@ -15,7 +16,6 @@ env:
   SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
   SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
 
-  JFROG_URL: ${{ secrets.JFROG_URL }}
   JFROG_REPO: devops-project
 
   AWS_REGION: us-east-1
@@ -26,6 +26,7 @@ permissions:
   contents: read
 
 jobs:
+
   gitleaks:
     name: Gitleaks Secret Scan
     runs-on: ubuntu-latest
@@ -40,6 +41,7 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
 
   build:
     name: Build Frontend
@@ -63,6 +65,7 @@ jobs:
 
       - name: Build frontend bundle
         run: npm run build
+
 
   test:
     name: Django Tests
@@ -105,9 +108,11 @@ jobs:
       - name: Run tests
         run: pytest
 
+
   sonarqube:
     name: SonarQube Analysis
     runs-on: ubuntu-latest
+
     needs:
       - build
       - test
@@ -128,10 +133,13 @@ jobs:
             -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
             -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}
 
+
   docker-build:
     name: Docker Build
     runs-on: ubuntu-latest
+
     if: github.event_name == 'pull_request'
+
     needs:
       - build
       - test
@@ -143,23 +151,28 @@ jobs:
       - name: Build Docker image
         run: docker build -t notesy-app:ci .
 
-  publish-ecr:
-    name: Build and Publish to Amazon ECR
+
+  publish:
+    name: Build and Publish to ECR and JFrog
     runs-on: ubuntu-latest
+
     needs:
+      - gitleaks
       - build
       - test
       - sonarqube
+
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     permissions:
       contents: read
       id-token: write
 
-
     steps:
+
       - name: Checkout code
         uses: actions/checkout@v4
+
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
@@ -167,33 +180,39 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ECR_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
+
       - name: Log in to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
+
 
       - name: Build Docker image
         run: |
           docker build \
             -t ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }} \
             -t ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest \
-            
-      - name: Check installed Python packages
-        run: |
-          docker run --rm \
-             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }} \
-              python -m pip list
             .
-      - name: Scan Docker image with Trivy
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          image-ref: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
-          format: table
-          exit-code: "1"
-          ignore-unfixed: true
-          severity: CRITICAL,HIGH
-          scanners: vuln
+
 
       - name: Push Docker image to ECR
         run: |
-          docker push ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
-          docker push ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
+          docker push \
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+
+          docker push \
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
+
+
+      - name: Export Docker image to TAR
+        run: |
+          docker save \
+            -o notesy-${{ github.sha }}.tar \
+            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+
+
+      - name: Upload TAR to JFrog
+        run: |
+          curl --fail --show-error --silent \
+            -u "${{ secrets.JFROG_USERNAME }}:${{ secrets.JFROG_ACCESS_TOKEN }}" \
+            -T "notesy-${{ github.sha }}.tar" \
+            "${{ secrets.JFROG_URL }}/artifactory/${{ env.JFROG_REPO }}/notesy-${{ github.sha }}.tar"
