@@ -197,6 +197,92 @@ jobs:
         run: |
           docker push \
             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
+  deploy-ecs:
+    name: Deploy to ECS
+    runs-on: ubuntu-latest
+    needs: publish-ecr
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_ECR_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download current task definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition notesy \
+            --region ${{ env.AWS_REGION }} \
+            --query taskDefinition \
+            > task-definition.json
+
+      - name: Update image
+        run: |
+          python - <<'PY'
+          import json
+
+          with open("task-definition.json") as f:
+              task = json.load(f)
+
+          image = (
+              "977098999802.dkr.ecr.us-east-1.amazonaws.com/"
+              "notesy:${{ github.sha }}"
+          )
+
+          task["containerDefinitions"][0]["image"] = image
+
+          for field in [
+              "taskDefinitionArn",
+              "revision",
+              "status",
+              "requiresAttributes",
+              "compatibilities",
+              "registeredAt",
+              "registeredBy"
+          ]:
+              task.pop(field, None)
+
+          with open("task-definition.json", "w") as f:
+              json.dump(task, f)
+
+          print(f"Deploying image: {image}")
+          PY
+
+      - name: Register new task definition
+        run: |
+          aws ecs register-task-definition \
+            --cli-input-json file://task-definition.json \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Update ECS service
+        run: |
+          aws ecs update-service \
+            --cluster notesy-cluster \
+            --service notesy-service \
+            --task-definition notesy \
+            --force-new-deployment \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Wait for deployment
+        run: |
+          aws ecs wait services-stable \
+            --cluster notesy-cluster \
+            --services notesy-service \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Verify ECS service
+        run: |
+          aws ecs describe-services \
+            --cluster notesy-cluster \
+            --services notesy-service \
+            --region ${{ env.AWS_REGION }} \
+            --query 'services[0].{Desired:desiredCount,Running:runningCount,Status:status,TaskDefinition:taskDefinition}' \
+            --output table
 
 
   publish-jfrog:
