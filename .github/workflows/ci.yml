@@ -1,10 +1,11 @@
-```yaml
+
 name: Notesy CI/CD
 
 on:
   pull_request:
   push:
-    branches: [main]
+    branches:
+      - main
 
 env:
   DJANGO_SECRET_KEY: ci-only-not-secret
@@ -15,12 +16,9 @@ env:
   SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
   SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
   SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
-
   JFROG_REPO: devops-project
-
   AWS_REGION: us-east-1
   ECR_REPOSITORY: notesy
-  AWS_ROLE_ARN: ${{ secrets.AWS_ECR_DEPLOY_ROLE_ARN }}
 
 permissions:
   contents: read
@@ -41,7 +39,6 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
 
   build:
     name: Build Frontend
@@ -65,7 +62,6 @@ jobs:
 
       - name: Build frontend bundle
         run: npm run build
-
 
   test:
     name: Django Tests
@@ -108,7 +104,6 @@ jobs:
       - name: Run tests
         run: pytest
 
-
   sonarqube:
     name: SonarQube Analysis
     runs-on: ubuntu-latest
@@ -133,7 +128,6 @@ jobs:
             -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
             -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}
 
-
   docker-build:
     name: Docker Build
     runs-on: ubuntu-latest
@@ -150,7 +144,6 @@ jobs:
 
       - name: Build Docker image
         run: docker build -t notesy-app:ci .
-
 
   publish:
     name: Build and Publish to ECR and JFrog
@@ -169,10 +162,8 @@ jobs:
       id-token: write
 
     steps:
-
       - name: Checkout code
         uses: actions/checkout@v4
-
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v6
@@ -180,11 +171,9 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ECR_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-
       - name: Log in to Amazon ECR
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
-
 
       - name: Build Docker image
         run: |
@@ -193,7 +182,6 @@ jobs:
             -t ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest \
             .
 
-
       - name: Push Docker image to ECR
         run: |
           docker push \
@@ -201,14 +189,11 @@ jobs:
 
           docker push \
             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
-
-
       - name: Export Docker image to TAR
         run: |
           docker save \
             -o notesy-${{ github.sha }}.tar \
             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
-
 
       - name: Upload TAR to JFrog
         run: |
