@@ -13,10 +13,11 @@ env:
   ALLOWED_HOSTS: localhost,127.0.0.1
   DATABASE_URL: postgresql://notesy:notesy@localhost:5432/notesy
 
-  SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
   SONAR_PROJECT_KEY: ${{ vars.SONAR_PROJECT_KEY }}
   SONAR_ORGANIZATION: ${{ vars.SONAR_ORGANIZATION }}
+
   JFROG_REPO: devops-project
+
   AWS_REGION: us-east-1
   ECR_REPOSITORY: notesy
 
@@ -40,6 +41,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+
   build:
     name: Build Frontend
     runs-on: ubuntu-latest
@@ -62,6 +64,7 @@ jobs:
 
       - name: Build frontend bundle
         run: npm run build
+
 
   test:
     name: Django Tests
@@ -104,6 +107,7 @@ jobs:
       - name: Run tests
         run: pytest
 
+
   sonarqube:
     name: SonarQube Analysis
     runs-on: ubuntu-latest
@@ -128,6 +132,7 @@ jobs:
             -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
             -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}
 
+
   docker-build:
     name: Docker Build
     runs-on: ubuntu-latest
@@ -145,8 +150,9 @@ jobs:
       - name: Build Docker image
         run: docker build -t notesy-app:ci .
 
-  publish:
-    name: Build and Publish to ECR and JFrog
+
+  publish-ecr:
+    name: Build and Publish to ECR
     runs-on: ubuntu-latest
 
     needs:
@@ -182,18 +188,44 @@ jobs:
             -t ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest \
             .
 
-      - name: Push Docker image to ECR
+      - name: Push image with commit SHA
         run: |
           docker push \
             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
 
+      - name: Push latest image
+        run: |
           docker push \
             ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:latest
+
+
+  publish-jfrog:
+    name: Build and Publish TAR to JFrog
+    runs-on: ubuntu-latest
+
+    needs:
+      - gitleaks
+      - build
+      - test
+      - sonarqube
+
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t notesy:${{ github.sha }} \
+            .
+
       - name: Export Docker image to TAR
         run: |
           docker save \
             -o notesy-${{ github.sha }}.tar \
-            ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+            notesy:${{ github.sha }}
 
       - name: Upload TAR to JFrog
         run: |
@@ -201,3 +233,4 @@ jobs:
             -u "${{ secrets.JFROG_USERNAME }}:${{ secrets.JFROG_ACCESS_TOKEN }}" \
             -T "notesy-${{ github.sha }}.tar" \
             "${{ secrets.JFROG_URL }}/artifactory/${{ env.JFROG_REPO }}/notesy-${{ github.sha }}.tar"
+
